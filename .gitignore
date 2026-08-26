@@ -1,0 +1,16 @@
+# Dependencies and build artifacts
+/node_modules
+/.next
+/out
+/coverage
+/playwright-report
+/test-results
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Local tooling files
+*.tsbuildinfo
+/drizzle/meta/*.snapshot.json
