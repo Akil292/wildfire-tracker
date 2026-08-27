@@ -8,6 +8,13 @@
       "when": 1787755200000,
       "tag": "0000_enable_postgis",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787862685047,
+      "tag": "0001_massive_karma",
+      "breakpoints": true
     }
   ]
 }

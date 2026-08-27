@@ -8,7 +8,9 @@ export const metadata: Metadata = {
   description: "Wildfire intelligence and situational awareness.",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+export default function RootLayout({
+  children,
+}: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
       <body>{children}</body>

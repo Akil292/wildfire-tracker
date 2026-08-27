@@ -4,9 +4,11 @@ import { databaseUrlSchema } from "@/schemas/environment";
 
 describe("databaseUrlSchema", () => {
   it("accepts a PostgreSQL connection URL", () => {
-    expect(databaseUrlSchema.safeParse("postgresql://user:password@localhost:5432/db").success).toBe(
-      true,
-    );
+    expect(
+      databaseUrlSchema.safeParse(
+        "postgresql://user:password@localhost:5432/db",
+      ).success,
+    ).toBe(true);
   });
 
   it("rejects a non-URL value", () => {

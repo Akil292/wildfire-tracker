@@ -1,6 +1,6 @@
 # Wildfire Tracker
 
-The Milestone 1 foundation for a wildfire intelligence application. It contains a Next.js App Router frontend, Tailwind CSS, PostgreSQL/PostGIS development database, Drizzle ORM migrations, Zod validation, and unit/end-to-end test tooling. No product data sources, maps, authentication, or scheduled processing are included yet.
+The Milestone 2 foundation for a wildfire intelligence application. It contains a Next.js App Router frontend, Tailwind CSS, PostgreSQL/PostGIS development database, Drizzle ORM migrations, Zod validation, and email/password authentication with database-backed sessions.
 
 ## Prerequisites
 
@@ -35,7 +35,18 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Database and PostGIS
 
-`docker-compose.yml` runs the `postgis/postgis` image locally and persists data in the named `postgres_data` Docker volume. `npm run db:migrate` executes the ordered SQL files in `drizzle/`; the initial migration enables the `postgis` extension and creates only generic application metadata. Future geographic tables can therefore use PostGIS types and functions without a separate setup step.
+`docker-compose.yml` runs the `postgis/postgis` image locally and persists data in the named `postgres_data` Docker volume. `npm run db:migrate` executes the ordered SQL files in `drizzle/`; the migrations enable the `postgis` extension, create application metadata, and create the `users` and `sessions` authentication tables.
+
+## Authentication
+
+- `/sign-up` creates an account and starts a session.
+- `/sign-in` authenticates an existing account.
+- `/dashboard` is protected by server-side session authorization.
+- `/api/auth/sign-out` invalidates the current session.
+
+Passwords are hashed with Argon2id. Session tokens are cryptographically random, stored as hashes in PostgreSQL, and sent only in HTTP-only, SameSite-protected cookies. Secure cookies are enabled in production. `AUTH_SECRET`, `DATABASE_URL`, password hashes, and session secrets remain server-only; authentication does not use `localStorage`.
+
+NASA FIRMS, Census geocoding, saved locations, maps, weather, air quality, activity scoring, alerts, and official wildfire integrations are intentionally deferred to later milestones.
 
 ## Environment variables
 
@@ -43,17 +54,17 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Commands
 
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Start the local Next.js development server. |
-| `npm run build` | Create a production build. |
-| `npm run lint` | Run ESLint. |
-| `npm run format:check` | Verify Prettier formatting. |
-| `npm run typecheck` | Run TypeScript checks. |
-| `npm test` | Run Vitest unit tests. |
-| `npm run test:e2e` | Run Playwright (no feature tests are defined yet). |
-| `npm run db:migrate` | Apply Drizzle migrations. |
-| `npm run db:generate` | Generate a new Drizzle migration from schema changes. |
+| Command                | Purpose                                               |
+| ---------------------- | ----------------------------------------------------- |
+| `npm run dev`          | Start the local Next.js development server.           |
+| `npm run build`        | Create a production build.                            |
+| `npm run lint`         | Run ESLint.                                           |
+| `npm run format:check` | Verify Prettier formatting.                           |
+| `npm run typecheck`    | Run TypeScript checks.                                |
+| `npm test`             | Run Vitest unit tests.                                |
+| `npm run test:e2e`     | Run Playwright end-to-end tests.                      |
+| `npm run db:migrate`   | Apply Drizzle migrations.                             |
+| `npm run db:generate`  | Generate a new Drizzle migration from schema changes. |
 
 ## Project structure
 

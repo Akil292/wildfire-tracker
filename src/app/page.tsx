@@ -9,8 +9,8 @@ export default function Home() {
           Project foundation is ready.
         </h1>
         <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-600">
-          The application, database tooling, validation, and test infrastructure are
-          configured. Product features will be added in later milestones.
+          The application, database tooling, validation, and test infrastructure
+          are configured. Product features will be added in later milestones.
         </p>
       </section>
     </main>
