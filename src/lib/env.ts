@@ -13,11 +13,12 @@ export const env = serverEnvironmentSchema.parse({
 });
 
 export function getDatabaseUrl(): string {
-  if (!env.DATABASE_URL) {
+  const dbUrl = process.env.DATABASE_URL ?? env.DATABASE_URL;
+  if (!dbUrl) {
     throw new Error("DATABASE_URL is required for database commands.");
   }
 
-  return env.DATABASE_URL;
+  return dbUrl;
 }
 
 export function getAuthSecret(): string {

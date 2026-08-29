@@ -1,6 +1,8 @@
 import {
+  boolean,
   index,
   pgTable,
+  real,
   text,
   timestamp,
   uniqueIndex,
@@ -49,4 +51,27 @@ export const sessions = pgTable(
     index("sessions_user_id_idx").on(table.userId),
     index("sessions_expires_at_idx").on(table.expiresAt),
   ],
+);
+
+export const savedLocations = pgTable(
+  "saved_locations",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    address: text("address").notNull(),
+    latitude: real("latitude").notNull(),
+    longitude: real("longitude").notNull(),
+    monitorRadiusMiles: real("monitor_radius_miles").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("saved_locations_user_id_idx").on(table.userId)],
 );
