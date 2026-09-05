@@ -15,7 +15,8 @@
     "test:e2e": "playwright test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file=.env scripts/migrate.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "ingest:firms": "tsx --env-file=.env scripts/ingest-firms.ts"
   },
   "dependencies": {
     "argon2": "^0.45.1",

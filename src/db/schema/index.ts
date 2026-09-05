@@ -75,3 +75,41 @@ export const savedLocations = pgTable(
   },
   (table) => [index("saved_locations_user_id_idx").on(table.userId)],
 );
+
+export const firmsDetections = pgTable(
+  "firms_detections",
+  {
+    id: text("id").primaryKey(),
+    source: text("source").notNull(),
+    latitude: real("latitude").notNull(),
+    longitude: real("longitude").notNull(),
+    acqDate: text("acq_date").notNull(),
+    acqTime: text("acq_time").notNull(),
+    acqTimestamp: timestamp("acq_timestamp", { withTimezone: true }).notNull(),
+    satellite: text("satellite").notNull(),
+    instrument: text("instrument").notNull(),
+    confidence: text("confidence").notNull(),
+    frp: real("frp"),
+    brightTi4: real("bright_ti4"),
+    brightTi5: real("bright_ti5"),
+    scan: real("scan"),
+    track: real("track"),
+    daynight: text("daynight"),
+    version: text("version"),
+    ingestedAt: timestamp("ingested_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("firms_detections_unique_observation").on(
+      table.source,
+      table.satellite,
+      table.latitude,
+      table.longitude,
+      table.acqDate,
+      table.acqTime,
+    ),
+    index("firms_detections_acq_timestamp_idx").on(table.acqTimestamp),
+    index("firms_detections_source_idx").on(table.source),
+  ],
+);
