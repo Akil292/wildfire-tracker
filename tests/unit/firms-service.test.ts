@@ -52,6 +52,7 @@ describe("firms-service", () => {
           duplicateCount: 0,
         };
       },
+      findNearbyForLocation: vi.fn(),
     };
 
     const summary = await ingestFirmsData({
@@ -89,6 +90,7 @@ describe("firms-service", () => {
           duplicateCount: 0,
         };
       },
+      findNearbyForLocation: vi.fn(),
     };
 
     const summary = await ingestFirmsData({

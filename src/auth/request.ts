@@ -5,7 +5,35 @@ import { sessionCookieOptions } from "./cookies";
 
 export function hasValidOrigin(request: Request): boolean {
   const origin = request.headers.get("origin");
-  return origin === null || origin === new URL(request.url).origin;
+  if (!origin) return true;
+
+  try {
+    const originUrl = new URL(origin);
+    const requestUrl = new URL(request.url);
+
+    if (originUrl.origin === requestUrl.origin) {
+      return true;
+    }
+
+    const host =
+      request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+    if (host && originUrl.host === host) {
+      return true;
+    }
+
+    // Treat localhost and 127.0.0.1 as equivalent for local dev and test environments
+    const normalizedOriginHost = originUrl.host.replace(
+      "127.0.0.1",
+      "localhost",
+    );
+    const normalizedRequestHost = requestUrl.host.replace(
+      "127.0.0.1",
+      "localhost",
+    );
+    return normalizedOriginHost === normalizedRequestHost;
+  } catch {
+    return false;
+  }
 }
 
 export function rateLimitKey(request: Request, email: unknown): string {

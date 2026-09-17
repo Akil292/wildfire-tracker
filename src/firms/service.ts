@@ -105,3 +105,18 @@ export async function ingestFirmsData(
     duplicatesSkipped: duplicateCount,
   };
 }
+
+/**
+ * Retrieves FIRMS thermal-anomaly detections within a saved location's monitoring radius.
+ * Enforces ownership: only returns data if the saved location belongs to the user.
+ */
+export async function getNearbyDetectionsForLocation(
+  locationId: string,
+  userId: string,
+  options?: { hours?: number; repository?: FirmsRepository },
+) {
+  const repository = options?.repository ?? drizzleFirmsRepository;
+  return repository.findNearbyForLocation(locationId, userId, {
+    hours: options?.hours,
+  });
+}

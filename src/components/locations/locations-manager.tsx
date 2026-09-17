@@ -1,7 +1,9 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
+import { LocationMap } from "@/components/map/location-map";
+import type { NearbyFirmsDetection } from "@/firms/types";
 import type { GeocodeResult, SavedLocation } from "@/locations/types";
 
 type LocationsManagerProps = {
@@ -10,6 +12,9 @@ type LocationsManagerProps = {
 
 export function LocationsManager({ initialLocations }: LocationsManagerProps) {
   const [locations, setLocations] = useState<SavedLocation[]>(initialLocations);
+  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(
+    initialLocations[0]?.id ?? null,
+  );
 
   // Form state
   const [label, setLabel] = useState("");
@@ -23,6 +28,76 @@ export function LocationsManager({ initialLocations }: LocationsManagerProps) {
     null,
   );
   const [activeActionId, setActiveActionId] = useState<string | null>(null);
+
+  // Detections & Map state
+  const [detections, setDetections] = useState<NearbyFirmsDetection[]>([]);
+  const [isLoadingDetections, setIsLoadingDetections] = useState(false);
+  const [detectionsError, setDetectionsError] = useState<string | null>(null);
+
+  const selectedLocation =
+    locations.find((l) => l.id === selectedLocationId) ?? locations[0] ?? null;
+  const selectedLocationIdActual = selectedLocation?.id;
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!selectedLocationIdActual) {
+      return;
+    }
+
+    Promise.resolve().then(() => {
+      if (!isMounted) return;
+      setIsLoadingDetections(true);
+      setDetectionsError(null);
+    });
+
+    fetch(`/api/locations/${selectedLocationIdActual}/detections`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!isMounted) return;
+        if (data.detections) {
+          setDetections(data.detections);
+        } else {
+          setDetectionsError(data.message || "Failed to load detections.");
+          setDetections([]);
+        }
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setDetectionsError("Network error while loading detections.");
+        setDetections([]);
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsLoadingDetections(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedLocationIdActual]);
+
+  async function handleRefreshDetections() {
+    if (!selectedLocationIdActual) return;
+    setIsLoadingDetections(true);
+    setDetectionsError(null);
+    try {
+      const res = await fetch(
+        `/api/locations/${selectedLocationIdActual}/detections`,
+      );
+      const data = await res.json();
+      if (data.detections) {
+        setDetections(data.detections);
+      } else {
+        setDetectionsError(data.message || "Failed to load detections.");
+        setDetections([]);
+      }
+    } catch {
+      setDetectionsError("Network error while loading detections.");
+    } finally {
+      setIsLoadingDetections(false);
+    }
+  }
 
   async function handleGeocodePreview(e: React.MouseEvent) {
     e.preventDefault();
@@ -81,6 +156,7 @@ export function LocationsManager({ initialLocations }: LocationsManagerProps) {
         setFormError(data.message || "Failed to save location.");
       } else {
         setLocations((prev) => [data.location, ...prev]);
+        setSelectedLocationId(data.location.id);
         setFormSuccess(`Location "${data.location.label}" added successfully.`);
         // Reset form
         setLabel("");
@@ -127,7 +203,11 @@ export function LocationsManager({ initialLocations }: LocationsManagerProps) {
       });
 
       if (res.ok) {
-        setLocations((prev) => prev.filter((l) => l.id !== id));
+        const remaining = locations.filter((l) => l.id !== id);
+        setLocations(remaining);
+        if (selectedLocationId === id) {
+          setSelectedLocationId(remaining[0]?.id ?? null);
+        }
       }
     } finally {
       setActiveActionId(null);
@@ -136,6 +216,48 @@ export function LocationsManager({ initialLocations }: LocationsManagerProps) {
 
   return (
     <div className="space-y-10">
+      {/* Interactive Monitoring Map */}
+      {selectedLocation && (
+        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <h2 className="text-xl font-bold tracking-tight text-slate-900">
+              Interactive Map & Detections
+            </h2>
+
+            {locations.length > 1 && (
+              <div className="flex items-center space-x-2">
+                <label
+                  className="text-xs font-medium text-slate-500"
+                  htmlFor="location-select"
+                >
+                  Active Location:
+                </label>
+                <select
+                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-800 shadow-xs focus:border-orange-500 focus:outline-hidden"
+                  id="location-select"
+                  onChange={(e) => setSelectedLocationId(e.target.value)}
+                  value={selectedLocation.id}
+                >
+                  {locations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.label} ({loc.monitorRadiusMiles} mi)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <LocationMap
+            detections={detections}
+            error={detectionsError}
+            isLoading={isLoadingDetections}
+            location={selectedLocation}
+            onRefresh={handleRefreshDetections}
+          />
+        </section>
+      )}
+
       {/* Add New Location Form */}
       <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
         <h2 className="text-xl font-bold tracking-tight text-slate-900">
@@ -284,61 +406,86 @@ export function LocationsManager({ initialLocations }: LocationsManagerProps) {
           </div>
         ) : (
           <ul className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {locations.map((loc) => (
-              <li
-                className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-xs"
-                key={loc.id}
-              >
-                <div>
-                  <div className="flex items-start justify-between">
-                    <h3 className="text-base font-semibold text-slate-900">
-                      {loc.label}
-                    </h3>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        loc.enabled
-                          ? "bg-green-100 text-green-800"
-                          : "bg-slate-100 text-slate-600"
-                      }`}
+            {locations.map((loc) => {
+              const isSelected = selectedLocation?.id === loc.id;
+              return (
+                <li
+                  className={`flex flex-col justify-between rounded-xl border bg-white p-5 shadow-xs transition-all ${
+                    isSelected
+                      ? "border-orange-500 ring-2 ring-orange-500/20"
+                      : "border-slate-200"
+                  }`}
+                  key={loc.id}
+                >
+                  <div>
+                    <div className="flex items-start justify-between">
+                      <h3 className="text-base font-semibold text-slate-900">
+                        {loc.label}
+                      </h3>
+                      <div className="flex items-center space-x-2">
+                        {isSelected && (
+                          <span className="inline-flex items-center rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-semibold text-orange-800">
+                            Viewing Map
+                          </span>
+                        )}
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                            loc.enabled
+                              ? "bg-green-100 text-green-800"
+                              : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          {loc.enabled ? "Active" : "Disabled"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="mt-2 text-sm text-slate-600">{loc.address}</p>
+
+                    <div className="mt-3 flex flex-wrap gap-y-1 text-xs text-slate-500">
+                      <span className="mr-4">
+                        Radius: {loc.monitorRadiusMiles} mi
+                      </span>
+                      <span>
+                        {Number(loc.latitude).toFixed(4)},{" "}
+                        {Number(loc.longitude).toFixed(4)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-3">
+                    <div className="flex items-center space-x-3">
+                      {!isSelected && (
+                        <button
+                          className="text-xs font-semibold text-orange-700 hover:text-orange-900"
+                          onClick={() => setSelectedLocationId(loc.id)}
+                          type="button"
+                        >
+                          View Map
+                        </button>
+                      )}
+                      <button
+                        className="text-xs font-medium text-slate-600 hover:text-slate-900 disabled:opacity-50"
+                        disabled={activeActionId === loc.id}
+                        onClick={() => handleToggleEnabled(loc)}
+                        type="button"
+                      >
+                        {loc.enabled ? "Disable" : "Enable"}
+                      </button>
+                    </div>
+
+                    <button
+                      className="text-xs font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
+                      disabled={activeActionId === loc.id}
+                      onClick={() => handleDelete(loc.id)}
+                      type="button"
                     >
-                      {loc.enabled ? "Active" : "Disabled"}
-                    </span>
+                      Remove
+                    </button>
                   </div>
-
-                  <p className="mt-2 text-sm text-slate-600">{loc.address}</p>
-
-                  <div className="mt-3 flex flex-wrap gap-y-1 text-xs text-slate-500">
-                    <span className="mr-4">
-                      Radius: {loc.monitorRadiusMiles} mi
-                    </span>
-                    <span>
-                      {Number(loc.latitude).toFixed(4)},{" "}
-                      {Number(loc.longitude).toFixed(4)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-3">
-                  <button
-                    className="text-xs font-medium text-slate-600 hover:text-slate-900 disabled:opacity-50"
-                    disabled={activeActionId === loc.id}
-                    onClick={() => handleToggleEnabled(loc)}
-                    type="button"
-                  >
-                    {loc.enabled ? "Disable" : "Enable"}
-                  </button>
-
-                  <button
-                    className="text-xs font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
-                    disabled={activeActionId === loc.id}
-                    onClick={() => handleDelete(loc.id)}
-                    type="button"
-                  >
-                    Remove
-                  </button>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

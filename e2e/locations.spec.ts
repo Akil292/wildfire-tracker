@@ -34,6 +34,7 @@ test.describe("Monitored Locations Flow", () => {
 
     // Sign up
     await page.goto("/sign-up");
+    await page.waitForLoadState("networkidle");
     await page.getByLabel("Email").fill(uniqueEmail);
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByLabel("Confirm password").fill(password);
@@ -71,8 +72,8 @@ test.describe("Monitored Locations Flow", () => {
 
     // Verify it is listed in the user's saved locations
     await expect(
-      page.getByRole("heading", { name: "HQ Office" }),
+      page.getByRole("heading", { name: "HQ Office", exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("Active")).toBeVisible();
+    await expect(page.getByText("Active", { exact: true })).toBeVisible();
   });
 });

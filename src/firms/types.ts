@@ -45,10 +45,49 @@ export type FirmsIngestionSummary = {
   duplicatesSkipped: number;
 };
 
+export type NearbyFirmsDetection = {
+  id: string;
+  source: FirmsSource;
+  satellite: FirmsSatellite;
+  latitude: number;
+  longitude: number;
+  acqTimestamp: Date;
+  confidence: string;
+  frp: number | null;
+  distanceMiles: number;
+};
+
+export type FindNearbyDetectionsOptions = {
+  hours?: number;
+};
+
+export type LocationDetectionsResult = {
+  location: {
+    id: string;
+    userId: string;
+    label: string;
+    address: string;
+    latitude: number;
+    longitude: number;
+    monitorRadiusMiles: number;
+    enabled: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+  detections: NearbyFirmsDetection[];
+  windowHours: number;
+};
+
 export interface FirmsRepository {
   insertDetections(
     detections: FirmsDetection[],
   ): Promise<{ insertedCount: number; duplicateCount: number }>;
+
+  findNearbyForLocation(
+    locationId: string,
+    userId: string,
+    options?: FindNearbyDetectionsOptions,
+  ): Promise<LocationDetectionsResult | undefined>;
 }
 
 export interface FirmsApiClient {

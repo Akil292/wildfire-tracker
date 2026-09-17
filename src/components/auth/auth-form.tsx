@@ -53,7 +53,7 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
     "mt-1 w-full rounded-md border border-slate-300 px-3 py-2";
 
   return (
-    <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
+    <form className="mt-8 space-y-5" method="post" onSubmit={handleSubmit}>
       <label className="block text-sm font-medium">
         Email
         <input
