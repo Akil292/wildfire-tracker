@@ -9,7 +9,7 @@ import type {
   FirmsRepository,
   FirmsSatellite,
   FirmsSource,
-  LocationDetectionsResult,
+  LocationNearbyQueryResult,
   NearbyFirmsDetection,
 } from "./types";
 
@@ -81,7 +81,7 @@ export const drizzleFirmsRepository: FirmsRepository = {
     locationId: string,
     userId: string,
     options: FindNearbyDetectionsOptions = {},
-  ): Promise<LocationDetectionsResult | undefined> {
+  ): Promise<LocationNearbyQueryResult | undefined> {
     const db = getDatabase();
     const windowHours = Math.max(1, Math.min(168, options.hours ?? 24));
     const sinceTimestamp = new Date(Date.now() - windowHours * 60 * 60 * 1000);

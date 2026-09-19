@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 
 import { LocationMap } from "@/components/map/location-map";
-import type { NearbyFirmsDetection } from "@/firms/types";
+import type { FirmsActivityGroup, NearbyFirmsDetection } from "@/firms/types";
 import type { GeocodeResult, SavedLocation } from "@/locations/types";
 
 type LocationsManagerProps = {
@@ -31,6 +31,9 @@ export function LocationsManager({ initialLocations }: LocationsManagerProps) {
 
   // Detections & Map state
   const [detections, setDetections] = useState<NearbyFirmsDetection[]>([]);
+  const [activityGroups, setActivityGroups] = useState<FirmsActivityGroup[]>(
+    [],
+  );
   const [isLoadingDetections, setIsLoadingDetections] = useState(false);
   const [detectionsError, setDetectionsError] = useState<string | null>(null);
 
@@ -56,15 +59,18 @@ export function LocationsManager({ initialLocations }: LocationsManagerProps) {
         if (!isMounted) return;
         if (data.detections) {
           setDetections(data.detections);
+          setActivityGroups(data.activityGroups || []);
         } else {
           setDetectionsError(data.message || "Failed to load detections.");
           setDetections([]);
+          setActivityGroups([]);
         }
       })
       .catch(() => {
         if (!isMounted) return;
         setDetectionsError("Network error while loading detections.");
         setDetections([]);
+        setActivityGroups([]);
       })
       .finally(() => {
         if (isMounted) {
@@ -88,9 +94,11 @@ export function LocationsManager({ initialLocations }: LocationsManagerProps) {
       const data = await res.json();
       if (data.detections) {
         setDetections(data.detections);
+        setActivityGroups(data.activityGroups || []);
       } else {
         setDetectionsError(data.message || "Failed to load detections.");
         setDetections([]);
+        setActivityGroups([]);
       }
     } catch {
       setDetectionsError("Network error while loading detections.");
@@ -249,6 +257,7 @@ export function LocationsManager({ initialLocations }: LocationsManagerProps) {
           </div>
 
           <LocationMap
+            activityGroups={activityGroups}
             detections={detections}
             error={detectionsError}
             isLoading={isLoadingDetections}

@@ -44,11 +44,36 @@ test.describe("Location Map and Proximity Visualization Flow", () => {
               longitude: -76.9284,
               acqTimestamp: new Date().toISOString(),
               satellite: "N20",
-              instrument: "VIIRS",
               confidence: "high",
               frp: 18.5,
-              daynight: "N",
               distanceMiles: 4.8,
+            },
+          ],
+          activityGroups: [
+            {
+              id: "group-mock-1",
+              detectionCount: 1,
+              representativeLatitude: 38.8451,
+              representativeLongitude: -76.9284,
+              minDistanceMiles: 4.8,
+              earliestAcqTimestamp: new Date().toISOString(),
+              latestAcqTimestamp: new Date().toISOString(),
+              sources: ["VIIRS_NOAA20_NRT"],
+              satellites: ["N20"],
+              maxFrp: 18.5,
+              detections: [
+                {
+                  id: "det-mock-1",
+                  source: "VIIRS_NOAA20_NRT",
+                  latitude: 38.8451,
+                  longitude: -76.9284,
+                  acqTimestamp: new Date().toISOString(),
+                  satellite: "N20",
+                  confidence: "high",
+                  frp: 18.5,
+                  distanceMiles: 4.8,
+                },
+              ],
             },
           ],
         }),
@@ -100,13 +125,15 @@ test.describe("Location Map and Proximity Visualization Flow", () => {
       page.getByText("Detected Thermal Anomalies (1)"),
     ).toBeVisible();
 
-    await expect(page.getByText("4.8 mi")).toBeVisible();
+    await expect(page.getByText(/1 Activity Group/i)).toBeVisible();
+
+    await expect(page.getByText("4.8 mi").first()).toBeVisible();
     await expect(page.getByText(/N20 \(VIIRS_NOAA20_NRT\)/i)).toBeVisible();
 
     // Verify factual disclaimer note
     await expect(
       page.getByText(
-        /FIRMS observations represent satellite-detected thermal anomalies/i,
+        /Activity groups are automated clusters of spatially and temporally adjacent NASA FIRMS thermal-anomaly pixel observations/i,
       ),
     ).toBeVisible();
   });

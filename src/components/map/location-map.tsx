@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import type { NearbyFirmsDetection } from "@/firms/types";
+import type { FirmsActivityGroup, NearbyFirmsDetection } from "@/firms/types";
 import { generateGeodesicCircle } from "@/lib/geo";
 import type { SavedLocation } from "@/locations/types";
 
@@ -36,6 +36,7 @@ export const DEFAULT_BASEMAP_STYLE: maplibregl.StyleSpecification = {
 type LocationMapProps = {
   location: SavedLocation;
   detections: NearbyFirmsDetection[];
+  activityGroups?: FirmsActivityGroup[];
   isLoading?: boolean;
   error?: string | null;
   onRefresh?: () => void;
@@ -44,6 +45,7 @@ type LocationMapProps = {
 export function LocationMap({
   location,
   detections,
+  activityGroups = [],
   isLoading = false,
   error = null,
   onRefresh,
@@ -55,6 +57,54 @@ export function LocationMap({
 
   const [selectedDetection, setSelectedDetection] =
     useState<NearbyFirmsDetection | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<FirmsActivityGroup | null>(
+    null,
+  );
+
+  const showGroupPopup = useCallback(
+    (g: FirmsActivityGroup, map: maplibregl.Map) => {
+      if (popupRef.current) {
+        popupRef.current.remove();
+      }
+
+      const earliestStr = new Date(g.earliestAcqTimestamp).toLocaleString();
+      const latestStr = new Date(g.latestAcqTimestamp).toLocaleString();
+
+      const popupContent = document.createElement("div");
+      popupContent.className = "p-2 text-xs space-y-1.5 text-slate-800";
+      popupContent.innerHTML = `
+        <div class="font-bold text-sm text-orange-950 border-b border-orange-200 pb-1">
+          FIRMS Thermal-Anomaly Activity Group
+        </div>
+        <div class="text-[11px] text-slate-600 font-medium pt-0.5">
+          ${g.detectionCount} satellite detections (within 3 km & 12 hrs)
+        </div>
+        <div class="grid grid-cols-2 gap-x-2 gap-y-1 pt-1">
+          <span class="text-slate-500 font-medium">Satellites:</span>
+          <span class="font-semibold text-slate-900">${g.satellites.join(", ")}</span>
+
+          <span class="text-slate-500 font-medium">Max FRP:</span>
+          <span class="font-semibold text-slate-900">${g.maxFrp !== null ? `${g.maxFrp} MW` : "N/A"}</span>
+
+          <span class="text-slate-500 font-medium">Closest Distance:</span>
+          <span class="font-bold text-orange-700">${g.minDistanceMiles} mi from ${location.label}</span>
+        </div>
+        <div class="pt-1.5 border-t border-slate-100 text-[10px] text-slate-500">
+          <div><strong>Earliest:</strong> ${earliestStr}</div>
+          <div><strong>Latest:</strong> ${latestStr}</div>
+        </div>
+        <div class="pt-1 text-[10px] text-slate-400 italic">
+          * Symbolic activity cluster; not an official fire boundary.
+        </div>
+      `;
+
+      popupRef.current = new maplibregl.Popup({ closeButton: true, offset: 12 })
+        .setLngLat([g.representativeLongitude, g.representativeLatitude])
+        .setDOMContent(popupContent)
+        .addTo(map);
+    },
+    [location.label],
+  );
 
   const showDetectionPopup = useCallback(
     (d: NearbyFirmsDetection, map: maplibregl.Map) => {
@@ -204,7 +254,93 @@ export function LocationMap({
         });
       }
 
-      // 3. Add / Update FIRMS Detections GeoJSON Layer
+      // 3. Add / Update Activity Groups Layer (for multi-detection clusters)
+      const multiDetectionGroups = activityGroups.filter(
+        (g) => g.detectionCount >= 2,
+      );
+
+      const groupsGeoJson = {
+        type: "FeatureCollection" as const,
+        features: multiDetectionGroups.map((g) => ({
+          type: "Feature" as const,
+          geometry: {
+            type: "Point" as const,
+            coordinates: [g.representativeLongitude, g.representativeLatitude],
+          },
+          properties: {
+            id: g.id,
+            detectionCount: g.detectionCount,
+            minDistanceMiles: g.minDistanceMiles,
+            maxFrp: g.maxFrp,
+          },
+        })),
+      };
+
+      const groupsSourceId = "activity-groups-source";
+      const groupsLayerId = "activity-groups-layer";
+      const groupsHaloId = "activity-groups-halo";
+
+      const existingGroupsSource = map.getSource(
+        groupsSourceId,
+      ) as maplibregl.GeoJSONSource;
+
+      if (existingGroupsSource) {
+        existingGroupsSource.setData(groupsGeoJson);
+      } else {
+        map.addSource(groupsSourceId, {
+          type: "geojson",
+          data: groupsGeoJson,
+        });
+
+        // Symbolic halo around the representative centroid of multi-detection clusters
+        map.addLayer({
+          id: groupsHaloId,
+          type: "circle",
+          source: groupsSourceId,
+          paint: {
+            "circle-radius": 18,
+            "circle-color": "#ea580c",
+            "circle-opacity": 0.15,
+            "circle-stroke-width": 1.5,
+            "circle-stroke-color": "#c2410c",
+          },
+        });
+
+        map.addLayer({
+          id: groupsLayerId,
+          type: "circle",
+          source: groupsSourceId,
+          paint: {
+            "circle-radius": 10,
+            "circle-color": "#c2410c",
+            "circle-stroke-width": 2,
+            "circle-stroke-color": "#ffffff",
+          },
+        });
+
+        // Interactive Click on Group Centroid
+        map.on("click", groupsLayerId, (e: maplibregl.MapLayerMouseEvent) => {
+          if (!e.features || e.features.length === 0) return;
+          const feature = e.features[0];
+          const props = feature.properties;
+          const matched = activityGroups.find((g) => g.id === props.id);
+          if (matched) {
+            setSelectedGroup(matched);
+            setSelectedDetection(null);
+            showGroupPopup(matched, map);
+          }
+        });
+
+        map.on("mouseenter", groupsLayerId, () => {
+          map.getCanvas().style.cursor = "pointer";
+        });
+
+        map.on("mouseleave", groupsLayerId, () => {
+          map.getCanvas().style.cursor = "";
+        });
+      }
+
+      // 4. Add / Update FIRMS Detections GeoJSON Layer
       const detectionsGeoJson = {
         type: "FeatureCollection" as const,
         features: detections.map((d) => ({
@@ -257,7 +393,7 @@ export function LocationMap({
           type: "circle",
           source: detectionsSourceId,
           paint: {
-            "circle-radius": 6,
+            "circle-radius": 5,
             "circle-color": "#ea580c",
             "circle-stroke-width": 1.5,
             "circle-stroke-color": "#ffffff",
@@ -275,6 +411,7 @@ export function LocationMap({
             const matched = detections.find((d) => d.id === props.id);
             if (matched) {
               setSelectedDetection(matched);
+              setSelectedGroup(null);
               showDetectionPopup(matched, map);
             }
           },
@@ -307,7 +444,13 @@ export function LocationMap({
     } else {
       map.once("load", updateLayers);
     }
-  }, [location, detections, showDetectionPopup]);
+  }, [
+    location,
+    detections,
+    activityGroups,
+    showDetectionPopup,
+    showGroupPopup,
+  ]);
 
   return (
     <div className="flex flex-col space-y-4">
@@ -319,7 +462,8 @@ export function LocationMap({
           </h3>
           <p className="text-xs text-slate-500">
             Displaying configured {location.monitorRadiusMiles}-mile monitoring
-            radius and satellite-detected thermal anomalies (last 24 hours).
+            radius, activity groups, and satellite-detected thermal anomalies
+            (last 24 hours).
           </p>
         </div>
 
@@ -368,6 +512,14 @@ export function LocationMap({
               Monitoring Radius ({location.monitorRadiusMiles} mi)
             </span>
           </div>
+          {activityGroups.some((g) => g.detectionCount >= 2) && (
+            <div className="flex items-center space-x-2">
+              <span className="h-3.5 w-3.5 rounded-full border border-white bg-orange-800 ring-2 ring-orange-400"></span>
+              <span className="font-medium text-slate-700">
+                Activity Group (cluster)
+              </span>
+            </div>
+          )}
           <div className="flex items-center space-x-2">
             <span className="h-3 w-3 rounded-full border border-white bg-orange-600"></span>
             <span className="font-medium text-slate-700">
@@ -388,8 +540,8 @@ export function LocationMap({
         </div>
       )}
 
-      {/* Detections Status & Factual Note */}
-      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+      {/* Detections & Groups Status */}
+      <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
         {detections.length === 0 && !isLoading ? (
           <div className="space-y-1">
             <p className="text-sm font-semibold text-slate-800">
@@ -405,57 +557,138 @@ export function LocationMap({
             </p>
           </div>
         ) : (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-slate-900">
-                Detected Thermal Anomalies ({detections.length})
-              </p>
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-1">
+              <div>
+                <p className="text-sm font-bold text-slate-900">
+                  Detected Thermal Anomalies ({detections.length})
+                </p>
+                <p className="text-xs text-slate-500">
+                  {activityGroups.length} Activity{" "}
+                  {activityGroups.length === 1 ? "Group" : "Groups"} (grouped by
+                  &le; 3 km distance &amp; &le; 12 hrs)
+                </p>
+              </div>
               <span className="text-xs text-slate-500">Last 24 Hours</span>
             </div>
 
-            <div className="grid max-h-48 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-3">
-              {detections.map((d) => (
-                <button
-                  key={d.id}
-                  onClick={() => {
-                    setSelectedDetection(d);
-                    if (mapRef.current) {
-                      mapRef.current.flyTo({
-                        center: [d.longitude, d.latitude],
-                        zoom: 11,
-                      });
-                      showDetectionPopup(d, mapRef.current);
-                    }
-                  }}
-                  className={`flex flex-col rounded-lg border p-2.5 text-left text-xs transition-colors ${
-                    selectedDetection?.id === d.id
-                      ? "border-orange-500 bg-orange-50/70"
-                      : "border-slate-200 bg-white hover:border-slate-300"
-                  }`}
-                  type="button"
-                >
-                  <div className="flex items-center justify-between font-semibold text-slate-900">
-                    <span>
-                      {d.satellite} ({d.source})
-                    </span>
-                    <span className="font-bold text-orange-700">
-                      {d.distanceMiles} mi
-                    </span>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
-                    <span className="capitalize">Conf: {d.confidence}</span>
-                    <span>{d.frp !== null ? `${d.frp} MW` : "FRP: N/A"}</span>
-                  </div>
-                  <div className="mt-1 text-[10px] text-slate-400">
-                    {new Date(d.acqTimestamp).toLocaleString()}
-                  </div>
-                </button>
-              ))}
+            {/* Activity Groups Summary Cards */}
+            {activityGroups.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="text-[11px] font-semibold tracking-wider text-slate-700 uppercase">
+                  Activity Groups ({activityGroups.length})
+                </div>
+                <div className="grid max-h-48 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-3">
+                  {activityGroups.map((g, idx) => {
+                    const isSelected = selectedGroup?.id === g.id;
+                    return (
+                      <button
+                        key={g.id}
+                        onClick={() => {
+                          setSelectedGroup(g);
+                          setSelectedDetection(null);
+                          if (mapRef.current) {
+                            mapRef.current.flyTo({
+                              center: [
+                                g.representativeLongitude,
+                                g.representativeLatitude,
+                              ],
+                              zoom: 11,
+                            });
+                            showGroupPopup(g, mapRef.current);
+                          }
+                        }}
+                        className={`flex flex-col rounded-lg border p-2.5 text-left text-xs transition-colors ${
+                          isSelected
+                            ? "border-orange-500 bg-orange-50/70"
+                            : "border-slate-200 bg-white hover:border-slate-300"
+                        }`}
+                        type="button"
+                      >
+                        <div className="flex items-center justify-between font-semibold text-slate-900">
+                          <span>
+                            Group #{idx + 1} ({g.detectionCount}{" "}
+                            {g.detectionCount === 1
+                              ? "detection"
+                              : "detections"}
+                            )
+                          </span>
+                          <span className="font-bold text-orange-700">
+                            {g.minDistanceMiles} mi
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                          <span>Satellites: {g.satellites.join(", ")}</span>
+                          <span>
+                            {g.maxFrp !== null
+                              ? `Max: ${g.maxFrp} MW`
+                              : "FRP: N/A"}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-[10px] text-slate-400">
+                          Latest:{" "}
+                          {new Date(g.latestAcqTimestamp).toLocaleString()}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Individual Detections List */}
+            <div className="space-y-1.5 pt-1">
+              <div className="text-[11px] font-semibold tracking-wider text-slate-700 uppercase">
+                Individual Observations ({detections.length})
+              </div>
+              <div className="grid max-h-40 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-3">
+                {detections.map((d) => (
+                  <button
+                    key={d.id}
+                    onClick={() => {
+                      setSelectedDetection(d);
+                      setSelectedGroup(null);
+                      if (mapRef.current) {
+                        mapRef.current.flyTo({
+                          center: [d.longitude, d.latitude],
+                          zoom: 11,
+                        });
+                        showDetectionPopup(d, mapRef.current);
+                      }
+                    }}
+                    className={`flex flex-col rounded-lg border p-2 text-left text-xs transition-colors ${
+                      selectedDetection?.id === d.id
+                        ? "border-orange-500 bg-orange-50/70"
+                        : "border-slate-200 bg-white hover:border-slate-300"
+                    }`}
+                    type="button"
+                  >
+                    <div className="flex items-center justify-between font-semibold text-slate-900">
+                      <span>
+                        {d.satellite} ({d.source})
+                      </span>
+                      <span className="font-bold text-orange-700">
+                        {d.distanceMiles} mi
+                      </span>
+                    </div>
+                    <div className="mt-0.5 flex items-center justify-between text-[11px] text-slate-500">
+                      <span className="capitalize">Conf: {d.confidence}</span>
+                      <span>{d.frp !== null ? `${d.frp} MW` : "FRP: N/A"}</span>
+                    </div>
+                    <div className="mt-0.5 text-[10px] text-slate-400">
+                      {new Date(d.acqTimestamp).toLocaleString()}
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
 
             <p className="border-t border-slate-200 pt-1 text-[11px] text-slate-500">
-              Note: FIRMS observations represent satellite-detected thermal
-              anomalies and are not confirmed wildfire perimeters.
+              Note: Activity groups are automated clusters of spatially and
+              temporally adjacent NASA FIRMS thermal-anomaly pixel observations
+              (thresholds: 3.0 km distance, 12 hours). They do not represent
+              confirmed wildfire incidents, official perimeters, or fire-spread
+              predictions.
             </p>
           </div>
         )}

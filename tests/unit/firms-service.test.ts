@@ -103,4 +103,69 @@ describe("firms-service", () => {
     expect(summary.observationsReceived).toBe(1);
     expect(summary.newRowsInserted).toBe(1);
   });
+
+  describe("getNearbyDetectionsForLocation", () => {
+    it("returns undefined when repository returns undefined (not found / not owned)", async () => {
+      const mockRepository: FirmsRepository = {
+        insertDetections: vi.fn(),
+        findNearbyForLocation: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const { getNearbyDetectionsForLocation } =
+        await import("@/firms/service");
+      const res = await getNearbyDetectionsForLocation("loc-x", "user-x", {
+        repository: mockRepository,
+      });
+
+      expect(res).toBeUndefined();
+    });
+
+    it("computes activity groups on detections returned by repository", async () => {
+      const { getNearbyDetectionsForLocation } =
+        await import("@/firms/service");
+
+      const mockRepository: FirmsRepository = {
+        insertDetections: vi.fn(),
+        findNearbyForLocation: vi.fn().mockResolvedValue({
+          location: {
+            id: "loc-1",
+            userId: "user-1",
+            label: "Home",
+            address: "123 Main St",
+            latitude: 38.8951,
+            longitude: -77.0364,
+            monitorRadiusMiles: 25.0,
+            enabled: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+          detections: [
+            {
+              id: "det-1",
+              source: "VIIRS_NOAA20_NRT",
+              satellite: "N20",
+              latitude: 38.8451,
+              longitude: -76.9284,
+              acqTimestamp: new Date("2026-09-04T09:30:00.000Z"),
+              confidence: "nominal",
+              frp: 12.0,
+              distanceMiles: 3.5,
+            },
+          ],
+          windowHours: 24,
+        }),
+      };
+
+      const res = await getNearbyDetectionsForLocation("loc-1", "user-1", {
+        repository: mockRepository,
+      });
+
+      expect(res).toBeDefined();
+      expect(res!.location.id).toBe("loc-1");
+      expect(res!.detections).toHaveLength(1);
+      expect(res!.activityGroups).toHaveLength(1);
+      expect(res!.activityGroups[0].detectionCount).toBe(1);
+      expect(res!.activityGroups[0].satellites).toEqual(["N20"]);
+    });
+  });
 });

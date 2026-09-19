@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDatabaseConnection, getDatabase } from "@/db";
 import { firmsDetections, users } from "@/db/schema";
 import { drizzleFirmsRepository } from "@/firms/repository";
+import { getNearbyDetectionsForLocation } from "@/firms/service";
 import type { FirmsDetection } from "@/firms/types";
 import { drizzleLocationRepository } from "@/locations/repository";
 
@@ -209,6 +210,17 @@ describe("PostGIS Proximity Query Integration", () => {
     // Verify ordering: newest first (detNear1 is 2h ago, detNear2 is 6h ago)
     expect(result!.detections[0].id).toBe(createdDetectionIds[0]);
     expect(result!.detections[1].id).toBe(createdDetectionIds[1]);
+
+    // Verify service-layer activity groups computation
+    const serviceResult = await getNearbyDetectionsForLocation(
+      locationAId,
+      userAId,
+      { hours: 24 },
+    );
+    expect(serviceResult).toBeDefined();
+    expect(serviceResult!.activityGroups).toHaveLength(2);
+    expect(serviceResult!.activityGroups[0].detectionCount).toBe(1);
+    expect(serviceResult!.activityGroups[1].detectionCount).toBe(1);
   });
 
   it("enforces server-side user ownership isolation (returns undefined for another user's location)", async () => {
@@ -232,5 +244,13 @@ describe("PostGIS Proximity Query Integration", () => {
     expect(sfResult).toBeDefined();
     expect(sfResult!.location.id).toBe(locationBId);
     expect(sfResult!.detections).toHaveLength(0);
+
+    const sfServiceResult = await getNearbyDetectionsForLocation(
+      locationBId,
+      userBId,
+      { hours: 24 },
+    );
+    expect(sfServiceResult).toBeDefined();
+    expect(sfServiceResult!.activityGroups).toHaveLength(0);
   });
 });

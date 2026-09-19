@@ -75,6 +75,21 @@ describe("GET /api/locations/[id]/detections", () => {
           distanceMiles: 3.82,
         },
       ],
+      activityGroups: [
+        {
+          id: "group_mock1",
+          detectionCount: 1,
+          representativeLatitude: 38.8451,
+          representativeLongitude: -76.9284,
+          minDistanceMiles: 3.82,
+          earliestAcqTimestamp: new Date("2026-09-04T09:30:00.000Z"),
+          latestAcqTimestamp: new Date("2026-09-04T09:30:00.000Z"),
+          sources: ["VIIRS_NOAA20_NRT" as const],
+          satellites: ["N20" as const],
+          maxFrp: 12.4,
+          detections: [],
+        },
+      ],
     };
 
     vi.spyOn(
@@ -96,6 +111,8 @@ describe("GET /api/locations/[id]/detections", () => {
     expect(body.detections[0].distanceMiles).toBe(3.82);
     expect(body.detections[0].satellite).toBe("N20");
     expect(body.detections[0].brightTi4).toBeUndefined();
+    expect(body.activityGroups).toHaveLength(1);
+    expect(body.activityGroups[0].id).toBe("group_mock1");
   });
 
   it("returns 400 when hours parameter is invalid or outside 1-168 range", async () => {

@@ -57,11 +57,15 @@ export type NearbyFirmsDetection = {
   distanceMiles: number;
 };
 
+export type { FirmsActivityGroup, GroupingOptions } from "./grouping/types";
+
+import type { FirmsActivityGroup } from "./grouping/types";
+
 export type FindNearbyDetectionsOptions = {
   hours?: number;
 };
 
-export type LocationDetectionsResult = {
+export type LocationNearbyQueryResult = {
   location: {
     id: string;
     userId: string;
@@ -78,6 +82,10 @@ export type LocationDetectionsResult = {
   windowHours: number;
 };
 
+export type LocationDetectionsResult = LocationNearbyQueryResult & {
+  activityGroups: FirmsActivityGroup[];
+};
+
 export interface FirmsRepository {
   insertDetections(
     detections: FirmsDetection[],
@@ -87,7 +95,7 @@ export interface FirmsRepository {
     locationId: string,
     userId: string,
     options?: FindNearbyDetectionsOptions,
-  ): Promise<LocationDetectionsResult | undefined>;
+  ): Promise<LocationNearbyQueryResult | undefined>;
 }
 
 export interface FirmsApiClient {

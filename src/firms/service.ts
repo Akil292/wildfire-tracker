@@ -5,6 +5,7 @@ import { savedLocations } from "@/db/schema";
 
 import { calculateBoundingBox, deduplicateBoundingBoxes } from "./bounding-box";
 import { defaultFirmsClient } from "./client";
+import { groupNearbyDetections } from "./grouping/clusterer";
 import { parseFirmsCsv } from "./parser";
 import { drizzleFirmsRepository } from "./repository";
 import {
@@ -13,6 +14,8 @@ import {
   type FirmsDetection,
   type FirmsIngestionSummary,
   type FirmsRepository,
+  type GroupingOptions,
+  type LocationDetectionsResult,
 } from "./types";
 
 export type IngestionServiceOptions = {
@@ -107,16 +110,35 @@ export async function ingestFirmsData(
 }
 
 /**
- * Retrieves FIRMS thermal-anomaly detections within a saved location's monitoring radius.
+ * Retrieves FIRMS thermal-anomaly detections within a saved location's monitoring radius
+ * and computes deterministic activity groups for thermal-anomaly observations.
  * Enforces ownership: only returns data if the saved location belongs to the user.
  */
 export async function getNearbyDetectionsForLocation(
   locationId: string,
   userId: string,
-  options?: { hours?: number; repository?: FirmsRepository },
-) {
+  options?: {
+    hours?: number;
+    repository?: FirmsRepository;
+    groupingOptions?: GroupingOptions;
+  },
+): Promise<LocationDetectionsResult | undefined> {
   const repository = options?.repository ?? drizzleFirmsRepository;
-  return repository.findNearbyForLocation(locationId, userId, {
+  const rawResult = await repository.findNearbyForLocation(locationId, userId, {
     hours: options?.hours,
   });
+
+  if (!rawResult) {
+    return undefined;
+  }
+
+  const activityGroups = groupNearbyDetections(
+    rawResult.detections,
+    options?.groupingOptions,
+  );
+
+  return {
+    ...rawResult,
+    activityGroups,
+  };
 }
