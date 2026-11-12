@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { LocationMap } from "@/components/map/location-map";
 import type { FirmsActivityGroup, NearbyFirmsDetection } from "@/firms/types";
@@ -29,53 +29,87 @@ export function LocationsManager({ initialLocations }: LocationsManagerProps) {
   );
   const [activeActionId, setActiveActionId] = useState<string | null>(null);
 
-  // Detections & Map state
-  const [detections, setDetections] = useState<NearbyFirmsDetection[]>([]);
-  const [activityGroups, setActivityGroups] = useState<FirmsActivityGroup[]>(
-    [],
-  );
-  const [isLoadingDetections, setIsLoadingDetections] = useState(false);
-  const [detectionsError, setDetectionsError] = useState<string | null>(null);
+  // Associate loaded detections and activity groups with the location ID that produced them.
+  // This ensures that switching saved locations immediately prevents the previous location's
+  // observations from being displayed under the newly selected location.
+  type LocationDetectionsState = {
+    locationId: string | null;
+    detections: NearbyFirmsDetection[];
+    activityGroups: FirmsActivityGroup[];
+    error: string | null;
+  };
+
+  const [detectionsState, setDetectionsState] =
+    useState<LocationDetectionsState>({
+      locationId: null,
+      detections: [],
+      activityGroups: [],
+      error: null,
+    });
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // A monotonically incrementing generation counter. Each new fetch increments
+  // this value; a completed fetch only applies its result if the generation it
+  // captured matches the current value, preventing older in-flight requests
+  // from overwriting results from newer location changes.
+  const fetchGenRef = useRef(0);
 
   const selectedLocation =
     locations.find((l) => l.id === selectedLocationId) ?? locations[0] ?? null;
-  const selectedLocationIdActual = selectedLocation?.id;
+  const selectedLocationIdActual = selectedLocation?.id ?? null;
+
+  const isCurrentLocationLoaded =
+    Boolean(selectedLocationIdActual) &&
+    detectionsState.locationId === selectedLocationIdActual;
+
+  const displayedDetections = isCurrentLocationLoaded
+    ? detectionsState.detections
+    : [];
+  const displayedActivityGroups = isCurrentLocationLoaded
+    ? detectionsState.activityGroups
+    : [];
+  const displayedError = isCurrentLocationLoaded ? detectionsState.error : null;
+  const isLoadingDetections = Boolean(
+    selectedLocationIdActual && (!isCurrentLocationLoaded || isRefreshing),
+  );
 
   useEffect(() => {
-    let isMounted = true;
     if (!selectedLocationIdActual) {
       return;
     }
 
-    Promise.resolve().then(() => {
-      if (!isMounted) return;
-      setIsLoadingDetections(true);
-      setDetectionsError(null);
-    });
+    fetchGenRef.current += 1;
+    const gen = fetchGenRef.current;
+    let isMounted = true;
 
     fetch(`/api/locations/${selectedLocationIdActual}/detections`)
       .then((res) => res.json())
       .then((data) => {
-        if (!isMounted) return;
+        if (!isMounted || gen !== fetchGenRef.current) return;
         if (data.detections) {
-          setDetections(data.detections);
-          setActivityGroups(data.activityGroups || []);
+          setDetectionsState({
+            locationId: selectedLocationIdActual,
+            detections: data.detections,
+            activityGroups: data.activityGroups || [],
+            error: null,
+          });
         } else {
-          setDetectionsError(data.message || "Failed to load detections.");
-          setDetections([]);
-          setActivityGroups([]);
+          setDetectionsState({
+            locationId: selectedLocationIdActual,
+            detections: [],
+            activityGroups: [],
+            error: data.message || "Failed to load detections.",
+          });
         }
       })
       .catch(() => {
-        if (!isMounted) return;
-        setDetectionsError("Network error while loading detections.");
-        setDetections([]);
-        setActivityGroups([]);
-      })
-      .finally(() => {
-        if (isMounted) {
-          setIsLoadingDetections(false);
-        }
+        if (!isMounted || gen !== fetchGenRef.current) return;
+        setDetectionsState({
+          locationId: selectedLocationIdActual,
+          detections: [],
+          activityGroups: [],
+          error: "Network error while loading detections.",
+        });
       });
 
     return () => {
@@ -85,25 +119,43 @@ export function LocationsManager({ initialLocations }: LocationsManagerProps) {
 
   async function handleRefreshDetections() {
     if (!selectedLocationIdActual) return;
-    setIsLoadingDetections(true);
-    setDetectionsError(null);
+
+    fetchGenRef.current += 1;
+    const gen = fetchGenRef.current;
+
+    setIsRefreshing(true);
     try {
       const res = await fetch(
         `/api/locations/${selectedLocationIdActual}/detections`,
       );
+      if (gen !== fetchGenRef.current) return;
       const data = await res.json();
       if (data.detections) {
-        setDetections(data.detections);
-        setActivityGroups(data.activityGroups || []);
+        setDetectionsState({
+          locationId: selectedLocationIdActual,
+          detections: data.detections,
+          activityGroups: data.activityGroups || [],
+          error: null,
+        });
       } else {
-        setDetectionsError(data.message || "Failed to load detections.");
-        setDetections([]);
-        setActivityGroups([]);
+        setDetectionsState({
+          locationId: selectedLocationIdActual,
+          detections: [],
+          activityGroups: [],
+          error: data.message || "Failed to load detections.",
+        });
       }
     } catch {
-      setDetectionsError("Network error while loading detections.");
+      if (gen === fetchGenRef.current) {
+        setDetectionsState((prev) => ({
+          ...prev,
+          error: "Network error while loading detections.",
+        }));
+      }
     } finally {
-      setIsLoadingDetections(false);
+      if (gen === fetchGenRef.current) {
+        setIsRefreshing(false);
+      }
     }
   }
 
@@ -257,9 +309,9 @@ export function LocationsManager({ initialLocations }: LocationsManagerProps) {
           </div>
 
           <LocationMap
-            activityGroups={activityGroups}
-            detections={detections}
-            error={detectionsError}
+            activityGroups={displayedActivityGroups}
+            detections={displayedDetections}
+            error={displayedError}
             isLoading={isLoadingDetections}
             location={selectedLocation}
             onRefresh={handleRefreshDetections}

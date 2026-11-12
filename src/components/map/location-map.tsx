@@ -8,6 +8,8 @@ import type { FirmsActivityGroup, NearbyFirmsDetection } from "@/firms/types";
 import { generateGeodesicCircle } from "@/lib/geo";
 import type { SavedLocation } from "@/locations/types";
 
+import { ActivityGroupDetail } from "./activity-group-detail";
+
 // OpenStreetMap standard raster basemap style for development & low-traffic portfolio demonstration.
 // Easily swappable for a production tile provider when configured.
 export const DEFAULT_BASEMAP_STYLE: maplibregl.StyleSpecification = {
@@ -57,9 +59,34 @@ export function LocationMap({
 
   const [selectedDetection, setSelectedDetection] =
     useState<NearbyFirmsDetection | null>(null);
-  const [selectedGroup, setSelectedGroup] = useState<FirmsActivityGroup | null>(
-    null,
-  );
+  // Store only the ID; derive the full object from current activityGroups so
+  // the detail view is always consistent with the latest data and auto-clears
+  // when a group disappears after refresh.
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+
+  // Keep references to latest detections and activity groups so map event handlers
+  // (which attach once when layers are created) never capture stale closures.
+  const detectionsRef = useRef(detections);
+  const activityGroupsRef = useRef(activityGroups);
+  const lastFittedLocationIdRef = useRef<string | null>(null);
+
+  // Track the last-rendered location ID so we can detect location changes
+  // during render (React's recommended mid-render state-reset pattern) and
+  // synchronously clear selection without a separate effect.
+  const [prevRenderedLocationId, setPrevRenderedLocationId] = useState<
+    string | null
+  >(location.id);
+  if (prevRenderedLocationId !== location.id) {
+    setPrevRenderedLocationId(location.id);
+    // Clearing these during render is safe — React will immediately re-render
+    // with the cleared values before painting, so no stale detail is shown.
+    if (selectedGroupId !== null) setSelectedGroupId(null);
+    if (selectedDetection !== null) setSelectedDetection(null);
+  }
+
+  // Derive the full selected group from the current groups array.
+  const selectedGroup =
+    activityGroups.find((g) => g.id === selectedGroupId) ?? null;
 
   const showGroupPopup = useCallback(
     (g: FirmsActivityGroup, map: maplibregl.Map) => {
@@ -149,6 +176,16 @@ export function LocationMap({
     [location.label],
   );
 
+  const showGroupPopupRef = useRef(showGroupPopup);
+  const showDetectionPopupRef = useRef(showDetectionPopup);
+
+  useEffect(() => {
+    detectionsRef.current = detections;
+    activityGroupsRef.current = activityGroups;
+    showGroupPopupRef.current = showGroupPopup;
+    showDetectionPopupRef.current = showDetectionPopup;
+  }, [detections, activityGroups, showGroupPopup, showDetectionPopup]);
+
   // Initialize Map
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -178,6 +215,8 @@ export function LocationMap({
     if (!map) return;
 
     const updateLayers = () => {
+      if (!map.isStyleLoaded()) return;
+
       // 1. Update Saved Location Center Marker
       if (locationMarkerRef.current) {
         locationMarkerRef.current.remove();
@@ -279,6 +318,7 @@ export function LocationMap({
       const groupsSourceId = "activity-groups-source";
       const groupsLayerId = "activity-groups-layer";
       const groupsHaloId = "activity-groups-halo";
+      const detectionsLayerId = "firms-detections-layer";
 
       const existingGroupsSource = map.getSource(
         groupsSourceId,
@@ -318,16 +358,27 @@ export function LocationMap({
           },
         });
 
-        // Interactive Click on Group Centroid
+        // Interactive Click on Group Centroid — opens the detail panel
         map.on("click", groupsLayerId, (e: maplibregl.MapLayerMouseEvent) => {
+          if (map.getLayer(detectionsLayerId)) {
+            const overlappingDetections = map.queryRenderedFeatures(e.point, {
+              layers: [detectionsLayerId],
+            });
+            if (overlappingDetections && overlappingDetections.length > 0) {
+              return;
+            }
+          }
+
           if (!e.features || e.features.length === 0) return;
           const feature = e.features[0];
           const props = feature.properties;
-          const matched = activityGroups.find((g) => g.id === props.id);
+          const matched = activityGroupsRef.current.find(
+            (g) => g.id === props.id,
+          );
           if (matched) {
-            setSelectedGroup(matched);
+            setSelectedGroupId(matched.id);
             setSelectedDetection(null);
-            showGroupPopup(matched, map);
+            showGroupPopupRef.current(matched, map);
           }
         });
 
@@ -362,7 +413,6 @@ export function LocationMap({
       };
 
       const detectionsSourceId = "firms-detections-source";
-      const detectionsLayerId = "firms-detections-layer";
       const detectionsGlowId = "firms-detections-glow";
 
       const existingDetectionsSource = map.getSource(
@@ -400,7 +450,8 @@ export function LocationMap({
           },
         });
 
-        // Interactive Click on Detection Point
+        // Interactive Click on Detection Point — shows detection popup only;
+        // does NOT auto-select an activity group (preserves existing behavior).
         map.on(
           "click",
           detectionsLayerId,
@@ -408,11 +459,13 @@ export function LocationMap({
             if (!e.features || e.features.length === 0) return;
             const feature = e.features[0];
             const props = feature.properties;
-            const matched = detections.find((d) => d.id === props.id);
+            const matched = detectionsRef.current.find(
+              (d) => d.id === props.id,
+            );
             if (matched) {
               setSelectedDetection(matched);
-              setSelectedGroup(null);
-              showDetectionPopup(matched, map);
+              setSelectedGroupId(null);
+              showDetectionPopupRef.current(matched, map);
             }
           },
         );
@@ -426,24 +479,39 @@ export function LocationMap({
         });
       }
 
-      // Fit map to radius bounds
-      const ring = circlePolygon.coordinates[0];
-      const bounds = ring.reduce(
-        (b, coord) => b.extend(coord as [number, number]),
-        new maplibregl.LngLatBounds(
-          [location.longitude, location.latitude],
-          [location.longitude, location.latitude],
-        ),
-      );
+      // Fit map to radius bounds only when location changes or on initial render
+      if (lastFittedLocationIdRef.current !== location.id) {
+        lastFittedLocationIdRef.current = location.id;
+        const ring = circlePolygon.coordinates[0];
+        const bounds = ring.reduce(
+          (b, coord) => b.extend(coord as [number, number]),
+          new maplibregl.LngLatBounds(
+            [location.longitude, location.latitude],
+            [location.longitude, location.latitude],
+          ),
+        );
 
-      map.fitBounds(bounds, { padding: 40, maxZoom: 12 });
+        map.fitBounds(bounds, { padding: 40, maxZoom: 12, animate: false });
+      }
+    };
+
+    const onLayersReady = () => {
+      if (map.isStyleLoaded()) {
+        updateLayers();
+      }
     };
 
     if (map.isStyleLoaded()) {
       updateLayers();
     } else {
-      map.once("load", updateLayers);
+      map.once("load", onLayersReady);
+      map.on("styledata", onLayersReady);
     }
+
+    return () => {
+      map.off("load", onLayersReady);
+      map.off("styledata", onLayersReady);
+    };
   }, [
     location,
     detections,
@@ -451,6 +519,98 @@ export function LocationMap({
     showDetectionPopup,
     showGroupPopup,
   ]);
+
+  // Lifecycle-safe synchronization of symbolic member-highlight layer whenever
+  // the selected group or detections change.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    let isSubscribed = true;
+
+    const syncHighlightLayer = () => {
+      if (!isSubscribed || !map.isStyleLoaded()) return;
+
+      const highlightSourceId = "selected-group-members-source";
+      const highlightLayerId = "selected-group-members-layer";
+
+      const memberIds = new Set(
+        selectedGroup ? selectedGroup.detections.map((d) => d.id) : [],
+      );
+
+      // Build a GeoJSON FeatureCollection of the selected group's member points.
+      const highlightGeoJson: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features: detections
+          .filter((d) => memberIds.has(d.id))
+          .map((d) => ({
+            type: "Feature" as const,
+            geometry: {
+              type: "Point" as const,
+              coordinates: [d.longitude, d.latitude],
+            },
+            properties: { id: d.id },
+          })),
+      };
+
+      const existingSource = map.getSource(highlightSourceId) as
+        maplibregl.GeoJSONSource | undefined;
+
+      if (existingSource) {
+        existingSource.setData(highlightGeoJson);
+      } else {
+        map.addSource(highlightSourceId, {
+          type: "geojson",
+          data: highlightGeoJson,
+        });
+      }
+
+      // Ensure the symbolic highlight layer is created without duplicates
+      if (!map.getLayer(highlightLayerId)) {
+        // Place underneath detection markers and group markers so it does not intercept clicks
+        const beforeLayerId =
+          map.getLayer("activity-groups-halo")?.id ??
+          map.getLayer("activity-groups-layer")?.id ??
+          map.getLayer("firms-detections-glow")?.id ??
+          map.getLayer("firms-detections-layer")?.id;
+
+        // Symbolic ring highlight — no polygon, no perimeter, no spread visual.
+        map.addLayer(
+          {
+            id: highlightLayerId,
+            type: "circle",
+            source: highlightSourceId,
+            paint: {
+              "circle-radius": 14,
+              "circle-color": "transparent",
+              "circle-stroke-width": 3,
+              "circle-stroke-color": "#7c3aed",
+            },
+          },
+          beforeLayerId,
+        );
+      }
+    };
+
+    const onHighlightReady = () => {
+      if (isSubscribed && map.isStyleLoaded()) {
+        syncHighlightLayer();
+      }
+    };
+
+    if (map.isStyleLoaded()) {
+      syncHighlightLayer();
+    } else {
+      map.once("load", onHighlightReady);
+      map.on("styledata", onHighlightReady);
+    }
+
+    return () => {
+      isSubscribed = false;
+      map.off("load", onHighlightReady);
+      map.off("styledata", onHighlightReady);
+    };
+  }, [selectedGroup, detections]);
 
   return (
     <div className="flex flex-col space-y-4">
@@ -483,7 +643,11 @@ export function LocationMap({
 
       {/* Map Container */}
       <div className="relative h-[480px] w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-100 shadow-xs">
-        <div className="h-full w-full" ref={mapContainerRef} />
+        <div
+          className="h-full w-full"
+          data-testid="location-map-container"
+          ref={mapContainerRef}
+        />
 
         {/* Loading Overlay */}
         {isLoading && (
@@ -580,12 +744,13 @@ export function LocationMap({
                 </div>
                 <div className="grid max-h-48 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-3">
                   {activityGroups.map((g, idx) => {
-                    const isSelected = selectedGroup?.id === g.id;
+                    const isSelected = selectedGroupId === g.id;
                     return (
                       <button
                         key={g.id}
+                        aria-pressed={isSelected}
                         onClick={() => {
-                          setSelectedGroup(g);
+                          setSelectedGroupId(g.id);
                           setSelectedDetection(null);
                           if (mapRef.current) {
                             mapRef.current.flyTo({
@@ -594,15 +759,20 @@ export function LocationMap({
                                 g.representativeLatitude,
                               ],
                               zoom: 11,
+                              duration: 500,
                             });
                             showGroupPopup(g, mapRef.current);
                           }
                         }}
-                        className={`flex flex-col rounded-lg border p-2.5 text-left text-xs transition-colors ${
+                        aria-label={`Activity Group #${idx + 1}, ${g.detectionCount} ${
+                          g.detectionCount === 1 ? "detection" : "detections"
+                        }, ${g.minDistanceMiles} miles from ${location.label}`}
+                        className={`flex flex-col rounded-lg border p-2.5 text-left text-xs transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-orange-500 ${
                           isSelected
-                            ? "border-orange-500 bg-orange-50/70"
+                            ? "border-orange-500 bg-orange-50/70 ring-2 ring-orange-200"
                             : "border-slate-200 bg-white hover:border-slate-300"
                         }`}
+                        data-testid={`group-card-${g.id}`}
                         type="button"
                       >
                         <div className="flex items-center justify-between font-semibold text-slate-900">
@@ -633,6 +803,20 @@ export function LocationMap({
                     );
                   })}
                 </div>
+
+                {/* Activity Group Detail Panel — shown when a group is selected */}
+                {selectedGroup && (
+                  <ActivityGroupDetail
+                    group={selectedGroup}
+                    locationLabel={location.label}
+                    onClose={() => {
+                      setSelectedGroupId(null);
+                      if (popupRef.current) {
+                        popupRef.current.remove();
+                      }
+                    }}
+                  />
+                )}
               </div>
             )}
 
@@ -647,7 +831,7 @@ export function LocationMap({
                     key={d.id}
                     onClick={() => {
                       setSelectedDetection(d);
-                      setSelectedGroup(null);
+                      setSelectedGroupId(null);
                       if (mapRef.current) {
                         mapRef.current.flyTo({
                           center: [d.longitude, d.latitude],
